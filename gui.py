@@ -326,22 +326,14 @@ class VideoToWebpConverter:
             # 构建命令
             cmd = [ffmpeg_exe, "-y", "-threads", str(threads)]  # 覆盖输出文件
 
-            # 添加时间控制 (仅对视频有效)
-            if not is_gif and start_time > 0:
-                cmd.extend(["-ss", str(start_time)])
-
+            # 添加输入文件
             cmd.extend(["-i", input_path])
-
-            if not is_gif and duration:
-                cmd.extend(["-t", str(float(duration))])
 
             # 构建滤镜链
             filters = []
 
             # FPS控制
-            if (
-                not is_gif or self.fps_var.get() != "10"
-            ):  # GIF默认保持原FPS，除非用户修改
+            if not is_gif or self.fps_var.get() != "10":
                 filters.append(f"fps={fps}")
 
             # 尺寸控制
@@ -355,33 +347,33 @@ class VideoToWebpConverter:
             if filters:
                 cmd.extend(["-vf", ",".join(filters)])
 
-            # 添加质量设置
-            quality = self.quality_var.get()
-            if quality == "high":
-                cmd.extend(["-quality", "90"])  # WebP质量0-100
-            elif quality == "medium":
-                cmd.extend(["-quality", "75"])
-            else:
-                cmd.extend(["-quality", "60"])
-
-            # 设置循环次数 (0表示无限循环)
-            cmd.extend(["-loop", "0"])
-
-            # 添加WebP编码器的特定参数
+            # 添加编码器选项
             cmd.extend(
                 [
-                    "-preset",
-                    "picture",  # 使用图片预设
-                    "-compression_level",
-                    "4",  # 压缩级别 (0-6)
+                    "-c:v",
+                    "libwebp",  # 使用 WebP 编码器
                     "-lossless",
                     "0",  # 使用有损压缩
-                    "-metadata",
-                    "none",  # 不包含元数据
+                    "-compression_level",
+                    "4",  # 压缩级别
+                    "-preset",
+                    "default",  # 使用默认预设
+                    "-loop",
+                    "0",  # 无限循环
                 ]
             )
 
-            # 添加输出文件
+            # 添加质量设置
+            quality = self.quality_var.get()
+            if quality == "high":
+                cmd.extend(["-qscale", "90"])  # WebP质量0-100
+            elif quality == "medium":
+                cmd.extend(["-qscale", "75"])
+            else:
+                cmd.extend(["-qscale", "60"])
+
+            # 规范化输出路径
+            output_path = os.path.normpath(output_path)
             cmd.append(output_path)
 
             # 获取subprocess配置
@@ -398,10 +390,11 @@ class VideoToWebpConverter:
             process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **subprocess_config
             )
-            _, stderr = process.communicate()
+            stdout, stderr = process.communicate()
 
             if process.returncode != 0:
-                raise RuntimeError(f"转换失败: {stderr.decode()}")
+                error_message = stderr.decode() if stderr else "未知错误"
+                raise RuntimeError(f"转换失败:\n{error_message}")
 
             return True
 
