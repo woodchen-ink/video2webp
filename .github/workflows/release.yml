@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # 添加这个权限声明
+  contents: write
 
 jobs:
   create-release:
@@ -16,13 +16,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v3
-
       - name: Generate version number
         id: version
         run: |
           SHA_SHORT=$(git rev-parse --short HEAD)
           echo "version=1.0.0-${SHA_SHORT}" >> $GITHUB_OUTPUT
-
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -39,12 +37,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
+          
       - name: Download FFmpeg
         run: |
           mkdir ffmpeg
@@ -62,8 +59,7 @@ jobs:
       - name: Build with PyInstaller
         shell: cmd
         run: |
-          pyinstaller --name video2webp --onefile --windowed --hidden-import ffmpeg --add-data "ffmpeg/ffmpeg.exe;ffmpeg" --add-data "ffmpeg/ffprobe.exe;ffmpeg" --add-data "README.md;." --clean --noconfirm --log-level=INFO gui.py
-
+          pyinstaller --name video2webp --onefile --windowed --add-data "ffmpeg/ffmpeg.exe;ffmpeg" --add-data "ffmpeg/ffprobe.exe;ffmpeg" --add-data "README.md;." --icon=icon.ico --clean gui.py
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
@@ -84,16 +80,7 @@ jobs:
         with:
           python-version: '3.11'
           
-      - name: Download FFmpeg
-        run: |
-          mkdir ffmpeg
-          curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b4.4/darwin-x64 -o ffmpeg/ffmpeg
-          curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b4.4/darwin-x64 -o ffmpeg/ffprobe
-          chmod +x ffmpeg/ffmpeg ffmpeg/ffprobe
-
-      # 或者使用 Homebrew（备选方案）
-      - name: Install FFmpeg using Homebrew
-        if: failure()
+      - name: Install FFmpeg
         run: |
           brew install ffmpeg
           mkdir -p ffmpeg
@@ -106,34 +93,75 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # 创建启动器脚本
-      - name: Create launcher script
+      # 创建 macOS 专用的启动器
+      - name: Create macOS launcher
         run: |
-          echo 'import os, sys; os.environ["PATH"] = os.path.join(os.path.dirname(sys.executable), "ffmpeg") + os.pathsep + os.environ["PATH"]' > launcher.py
-          cat gui.py >> launcher.py
+          cat > macos_launcher.py << EOL
+          import os
+          import sys
+          import tkinter.filedialog
+          import tkinter.messagebox
+          from tkinter import *
           
+          # macOS 原生拖放支持
+          def drop_handler(event):
+              if not hasattr(event, 'data'): return
+              files = event.data.split('\n')
+              files = [f.strip() for f in files if f.strip()]
+              if files:
+                  app.handle_drop_files(files)
+          
+          # 修改主程序以支持原生拖放
+          with open('gui.py', 'r') as f:
+              code = f.read()
+              
+          code = code.replace(
+              'from tkinterdnd2 import TkinterDnD, DND_FILES',
+              '# Using native macOS drag and drop'
+          )
+          
+          # 添加原生拖放支持
+          code = code.replace(
+              'self.root = TkinterDnD.Tk()',
+              'self.root = tk.Tk()\n        self.root.drop_target_register = lambda *args: None\n        self.root.bind("<<DropFiles>>", drop_handler)'
+          )
+          
+          with open('gui_macos.py', 'w') as f:
+              f.write(code)
+          EOL
+
       - name: Build with PyInstaller
         run: |
-          pyinstaller --name video2webp --onefile --windowed --add-data "ffmpeg/ffmpeg:ffmpeg" --add-data "ffmpeg/ffprobe:ffmpeg" --add-data "README.md:." launcher.py
-          
-      - name: Create DMG
+          pyinstaller --name video2webp \
+            --onefile \
+            --windowed \
+            --add-data "ffmpeg/ffmpeg:ffmpeg" \
+            --add-data "ffmpeg/ffprobe:ffmpeg" \
+            --add-data "README.md:." \
+            --icon=icons/logo800.icns \
+            --clean \
+            macos_launcher.py
+
+      - name: Create App Bundle
         run: |
-          cd dist
-          mkdir -p video2webp.app/Contents/MacOS
-          mkdir -p video2webp.app/Contents/Resources/ffmpeg
-          mv video2webp video2webp.app/Contents/MacOS/
-          cp ../ffmpeg/* video2webp.app/Contents/Resources/ffmpeg/
+          mkdir -p "dist/Video2Webp.app/Contents/MacOS"
+          mkdir -p "dist/Video2Webp.app/Contents/Resources"
+          cp dist/video2webp "dist/Video2Webp.app/Contents/MacOS/"
+          cp -r ffmpeg "dist/Video2Webp.app/Contents/Resources/"
+          cp icons/logo800.icns "dist/Video2Webp.app/Contents/Resources/video2webp.icns"
           
           # 创建 Info.plist
-          cat > video2webp.app/Contents/Info.plist << EOL
+          cat > "dist/Video2Webp.app/Contents/Info.plist" << EOL
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>CFBundleExecutable</key>
               <string>video2webp</string>
+              <key>CFBundleIconFile</key>
+              <string>video2webp.icns</string>
               <key>CFBundleIdentifier</key>
-              <string>com.example.video2webp</string>
+              <string>com.video2webp.app</string>
               <key>CFBundleName</key>
               <string>Video2Webp</string>
               <key>CFBundlePackageType</key>
@@ -144,17 +172,34 @@ jobs:
               <string>10.10</string>
               <key>NSHighResolutionCapable</key>
               <true/>
+              <key>CFBundleDocumentTypes</key>
+              <array>
+                  <dict>
+                      <key>CFBundleTypeExtensions</key>
+                      <array>
+                          <string>mp4</string>
+                          <string>avi</string>
+                          <string>mov</string>
+                          <string>mkv</string>
+                          <string>webm</string>
+                          <string>gif</string>
+                      </array>
+                      <key>CFBundleTypeRole</key>
+                      <string>Viewer</string>
+                  </dict>
+              </array>
           </dict>
           </plist>
           EOL
-          
-          # 创建 DMG
-          hdiutil create -volname "Video2Webp" -srcfolder video2webp.app -ov -format UDZO video2webp.dmg
-          
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Video2Webp" -srcfolder "dist/Video2Webp.app" -ov -format UDZO "dist/Video2Webp.dmg"
+
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
-          files: ./dist/video2webp.dmg
+          files: ./dist/Video2Webp.dmg

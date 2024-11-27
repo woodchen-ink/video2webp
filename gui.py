@@ -8,6 +8,15 @@ import webbrowser
 from threading import Thread
 import traceback
 
+# 修改 tkinterdnd2 的导入和初始化方式
+ENABLE_DND = False
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+
+    ENABLE_DND = True
+except ImportError:
+    print("tkinterdnd2 导入失败，拖放功能将不可用")
+
 # 设置 FFmpeg 路径
 if getattr(sys, "frozen", False):
     # 运行在 PyInstaller 打包后的环境
@@ -36,8 +45,12 @@ def get_subprocess_config():
 
 class VideoToWebpConverter:
     def __init__(self):
-        # 创建主窗口
-        self.root = tk.Tk()
+        # 创建主窗口，使用 TkinterDnD.Tk() 替代 tk.Tk()
+        if ENABLE_DND:
+            self.root = TkinterDnD.Tk()
+        else:
+            self.root = tk.Tk()
+
         self.root.title("视频或gif转WEBP工具")
 
         # 设置窗口大小和位置
@@ -53,6 +66,17 @@ class VideoToWebpConverter:
         style = ttk.Style()
         style.configure("TButton", padding=6)
         style.configure("TLabelframe", background="#f0f0f0")
+
+        # 只在支持拖放时启用相关功能
+        if ENABLE_DND:
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind("<<Drop>>", self.handle_drop)
+
+            # 添加拖放提示标签
+            self.drop_label = ttk.Label(
+                self.root, text="将视频文件拖放到此处", font=("", 12), foreground="gray"
+            )
+            self.drop_label.pack(pady=10)
 
         # 设置UI
         self.setup_ui()
@@ -453,6 +477,26 @@ class VideoToWebpConverter:
 
     def run(self):
         self.root.mainloop()
+
+    def handle_drop(self, event):
+        """处理文件拖放事件"""
+        files = self.root.tk.splitlist(event.data)
+        valid_extensions = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".gif")
+
+        # 过滤出支持的文件格式
+        valid_files = [f for f in files if f.lower().endswith(valid_extensions)]
+
+        if valid_files:
+            # 清空现有列表
+            self.files_list.delete(0, tk.END)
+            # 添加新文件
+            for file in valid_files:
+                self.files_list.insert(tk.END, file)
+        else:
+            messagebox.showwarning(
+                "格式不支持",
+                "请拖放支持的视频格���文件：\n" + ", ".join(valid_extensions),
+            )
 
 
 if __name__ == "__main__":
